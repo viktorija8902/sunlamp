@@ -39,7 +39,7 @@ export default class App extends Component<Props> {
   minBrightness = 0;
   brightenPerSecond = 0.10;
   darkenPerSecond = 10;
-  numberOfSchedules = 2; //turn-off and turn-on schedule
+  numberOfSchedules = 4; //turn-off and turn-on schedule
 
   componentDidMount() {
     // console.log("mounted")
@@ -66,7 +66,7 @@ export default class App extends Component<Props> {
       const schedulesReceived = responseArray[0] === "ACK" && responseArray.length > 2;
       const lampTurnedOff = "ACK 0\r\n";
       const scheduleSet = responseArray[0] === "ACK\r\n" && responseArray.length === 1;
-      const error = responseArray[0].startsWith("ERR");
+      const error = response.data.startsWith("ERR");
       if (error) {
         this.setState({
           error: true,
@@ -80,29 +80,58 @@ export default class App extends Component<Props> {
             turnedOff: false,
             showSuccessIcon: true,
         });
-      } else if (responseArray[0] === lampTurnedOff) {
+      } else if (response.data === lampTurnedOff) {
           this.setState({
             error: false,
             turnedOff: true,
             showSuccessIcon: false,
           });
       } else if (schedulesReceived) {
-        if (responseArray[2] === this.workdayBitmask.toString()) {
-          this.setState({
-            workdayHour: parseInt(responseArray[3]),
-            workdayMinute: parseInt(responseArray[4]),
-          });
-        } else if (responseArray[2] === this.holidayBitmask.toString()) {
-          this.setState({
-            holidayHour: parseInt(responseArray[3]),
-            holidayMinute: parseInt(responseArray[4]),
-          });
-        }
+        const schedules = this.formSchedules(response.data);
+        const turnOnSchedules = [schedules[0], schedules[2]];
+        let workdayHour, workdayMinute, holidayHour, holidayMinute;
+        turnOnSchedules.forEach(s => {
+          console.log("Schedule", s)
+          if (s[0] === this.workdayBitmask.toString()) {
+            workdayHour = s[1];
+            workdayMinute = s[2];
+          } else if (s[0] === this.holidayBitmask.toString()) {
+            holidayHour = s[1];
+            holidayMinute = s[2];
+          }
+        })
+        console.log(workdayHour, workdayMinute)
+        console.log(holidayHour, holidayMinute)
+        this.setState({
+          workdayHour: parseInt(workdayHour),
+          workdayMinute: parseInt(workdayMinute),
+          holidayHour: parseInt(holidayHour),
+          holidayMinute: parseInt(holidayMinute),
+        });
+      }
+    });
+  }
+
+  formSchedules = data => {
+    let schedules = [];
+    let schedule = [];
+    let schedulesArray = data.split(" ").slice(2);
+    schedulesArray.forEach(n => {
+      if (schedule.length === 4 ) {
+        schedule = schedule.concat(n);
+        schedules = schedules.concat([schedule]);
+        schedule = [];
+      } else {
+        schedule = schedule.concat(n);
       }
     })
+    return schedules;
   }
 
    connectToDevice = () => {
+       this.setState({
+         connectionStatus: "connecting",
+       })
       return BluetoothSerial.list()
          .then(data => {
             console.log("devices", data)
@@ -148,17 +177,32 @@ export default class App extends Component<Props> {
     return BluetoothSerial.isConnected()
         .then(connected => {
             if (connected) {
-                this.sendWorkdaySchedule();
-                this.sendHolidaySchedule();
+//                this.sendWorkdaySchedule();
+//                this.sendHolidaySchedule();
+                this.sendSchedules()
             } else {
                 return this.connectToDevice().then(connected => {
                    if (connected) {
-                        this.sendWorkdaySchedule();
-                        this.sendHolidaySchedule();
+                        this.sendSchedules();
+//                        this.sendWorkdaySchedule();
+//                        this.sendHolidaySchedule();
                    }
                 });
             }
         })
+  }
+
+  sendSchedules() {
+       const workdayTurnOnSchedule = `${this.state.workdayHour} ${this.state.workdayMinute} ${this.maxBrightness} ${this.brightenPerSecond}`;
+       const workdayTurnOffSchedule = `${this.getTurnOffHour(this.state.workdayHour)} ${this.state.workdayMinute} ${this.minBrightness} ${this.darkenPerSecond}`;
+       //BluetoothSerial.write(`ssc ${this.numberOfSchedules} ${this.workdayBitmask} ${workdayTurnOnSchedule} ${this.workdayBitmask} ${workdayTurnOffSchedule}\n`);
+
+       const holidayTurnOnSchedule = `${this.state.holidayHour} ${this.state.holidayMinute} ${this.maxBrightness} ${this.brightenPerSecond}`;
+       const holidayTurnOffSchedule = `${this.getTurnOffHour(this.state.holidayHour)} ${this.state.holidayMinute} ${this.minBrightness} ${this.darkenPerSecond}`;
+       console.log()
+       BluetoothSerial.write(
+            `ssc ${this.numberOfSchedules} ${this.holidayBitmask} ${holidayTurnOnSchedule} ${this.holidayBitmask} ${holidayTurnOffSchedule}
+            ${this.workdayBitmask} ${workdayTurnOnSchedule} ${this.workdayBitmask} ${workdayTurnOffSchedule}\n`);
   }
 
   sendWorkdaySchedule() {
