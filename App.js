@@ -10,6 +10,8 @@ import React, {Component} from 'react';
 import { Text, Platform, View, StyleSheet, Picker, Button } from 'react-native';
 import BluetoothSerial from 'react-native-bluetooth-serial';
 
+import { CONNECTION_STATUS } from './Constants';
+import { Message } from './Message';
 
 const instructions = Platform.select({
   ios: 'Press Cmd+R to reload,\n' + 'Cmd+D or shake for dev menu',
@@ -21,37 +23,40 @@ const instructions = Platform.select({
 type Props = {};
 export default class App extends Component<Props> {
   state = {
-        workdayHour: "",
-        workdayMinute: "",
-        holidayHour: "",
-        holidayMinute: "",
-        showSuccessIcon: false,
-        turnedOff: false,
-        error: false,
-        connectionStatus: "connecting",
+    workdayHour: "",
+    workdayMinute: "",
+    holidayHour: "",
+    holidayMinute: "",
+    showSuccessIcon: false,
+    turnedOff: false,
+    error: false,
+    connectionStatus: CONNECTION_STATUS.CONNECTING,
   };
 
   workdaysBinary = "10111110";
   workdayBitmask = parseInt(this.workdaysBinary, 2);
   holidayBinary = "11000001";
   holidayBitmask = parseInt(this.holidayBinary, 2);
+  
   maxBrightness = 255;
   minBrightness = 0;
   brightenPerSecond = 0.10;
   darkenPerSecond = 10;
   numberOfSchedules = 4; //turn-off and turn-on schedule
 
+  hours = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
+  minutes = [0,5,10,15,20,25,30,35,40,45,50,55];
+
   componentDidMount() {
-    // console.log("mounted")
     BluetoothSerial.withDelimiter('\n').then(() => {
-        this.handleResponses();
+      this.handleResponses();
     });
 
     return this.connectToDevice().then(connected => {
-          if (connected) {
-            console.log("getting schedules")
-            BluetoothSerial.write("gsc\n")
-          }
+      if (connected) {
+        console.log("getting schedules")
+        BluetoothSerial.write("gsc\n")
+      }
     });
   }
 
@@ -91,7 +96,6 @@ export default class App extends Component<Props> {
         const turnOnSchedules = [schedules[0], schedules[2]];
         let workdayHour, workdayMinute, holidayHour, holidayMinute;
         turnOnSchedules.forEach(s => {
-          console.log("Schedule", s)
           if (s[0] === this.workdayBitmask.toString()) {
             workdayHour = s[1];
             workdayMinute = s[2];
@@ -99,9 +103,7 @@ export default class App extends Component<Props> {
             holidayHour = s[1];
             holidayMinute = s[2];
           }
-        })
-        console.log(workdayHour, workdayMinute)
-        console.log(holidayHour, holidayMinute)
+        });
         this.setState({
           workdayHour: parseInt(workdayHour),
           workdayMinute: parseInt(workdayMinute),
@@ -117,7 +119,7 @@ export default class App extends Component<Props> {
     let schedule = [];
     let schedulesArray = data.split(" ").slice(2);
     schedulesArray.forEach(n => {
-      if (schedule.length === 4 ) {
+      if (schedule.length === 4) {
         schedule = schedule.concat(n);
         schedules = schedules.concat([schedule]);
         schedule = [];
@@ -128,38 +130,36 @@ export default class App extends Component<Props> {
     return schedules;
   }
 
-   connectToDevice = () => {
-       this.setState({
-         connectionStatus: "connecting",
-       })
-      return BluetoothSerial.list()
-         .then(data => {
-            console.log("devices", data)
-            const id = data.find(device => device.name === "SUNLAMP").id;
-            return BluetoothSerial.connect(id)
-         }).then(()=> {
-              this.setState({
-                 connectionStatus: "connected"
-              })
-              return true;
-         }).catch(error => {
-              console.error("connection error", error)
-              this.setState({
-                 connectionStatus: "not-connected"
-              })
-              return false;
-         })
-    }
-
+  connectToDevice = () => {
+    this.setState({
+      connectionStatus: CONNECTION_STATUS.CONNECTING,
+    })
+    return BluetoothSerial.list()
+      .then(devices => {
+        console.log("devices", devices)
+        const id = devices.find(device => device.name === "SUNLAMP").id;
+        return BluetoothSerial.connect(id);
+      }).then(()=> {
+        this.setState({
+          connectionStatus: CONNECTION_STATUS.CONNECTED,
+        });
+        return true;
+      }).catch(error => {
+        console.error("connection error", error)
+        this.setState({
+          connectionStatus: CONNECTION_STATUS.NOT_CONNECTED,
+        });
+        return false;
+      })
+  }
 
   renderOptionsFrom = options =>
     options.map(option => <Picker.Item key={option.toString()} label={option.toString()} value={option} />);
 
   renderDefaultValue = value => <Picker.Item label={`Select ${value}`} value="not selected"/>;
 
-  turnOff = () => {
-    console.log("CLICKED")
-    return BluetoothSerial.isConnected()
+  turnOff = () => (
+    BluetoothSerial.isConnected()
       .then(connected => {
         if (connected) {
           BluetoothSerial.write("sdl 0\n");
@@ -170,83 +170,63 @@ export default class App extends Component<Props> {
             }
           })
         }
-      });
-  }
+      })
+  );
 
   setSchedule = () => {
     return BluetoothSerial.isConnected()
-        .then(connected => {
+      .then(connected => {
+        if (connected) {
+          const schedules = this.prepareForSending();
+          this.send(schedules);
+        } else {
+          return this.connectToDevice().then(connected => {
             if (connected) {
-//                this.sendWorkdaySchedule();
-//                this.sendHolidaySchedule();
-                this.sendSchedules()
-            } else {
-                return this.connectToDevice().then(connected => {
-                   if (connected) {
-                        this.sendSchedules();
-//                        this.sendWorkdaySchedule();
-//                        this.sendHolidaySchedule();
-                   }
-                });
+              const schedules = this.prepareForSending();
+              this.send(schedules);
             }
-        })
+          });
+        }
+      })
   }
 
-  sendSchedules() {
-       const workdayTurnOnSchedule = `${this.state.workdayHour} ${this.state.workdayMinute} ${this.maxBrightness} ${this.brightenPerSecond}`;
-       const workdayTurnOffSchedule = `${this.getTurnOffHour(this.state.workdayHour)} ${this.state.workdayMinute} ${this.minBrightness} ${this.darkenPerSecond}`;
-       //BluetoothSerial.write(`ssc ${this.numberOfSchedules} ${this.workdayBitmask} ${workdayTurnOnSchedule} ${this.workdayBitmask} ${workdayTurnOffSchedule}\n`);
+  prepareForSending = () => {
+    const workdayTurnOnSchedule = `${this.workdayBitmask} ${this.state.workdayHour} ${this.state.workdayMinute} ${this.maxBrightness} ${this.brightenPerSecond}`;
+    const workdayTurnOffSchedule = `${this.workdayBitmask} ${this.getTurnOffHour(this.state.workdayHour)} ${this.state.workdayMinute} ${this.minBrightness} ${this.darkenPerSecond}`;
 
-       const holidayTurnOnSchedule = `${this.state.holidayHour} ${this.state.holidayMinute} ${this.maxBrightness} ${this.brightenPerSecond}`;
-       const holidayTurnOffSchedule = `${this.getTurnOffHour(this.state.holidayHour)} ${this.state.holidayMinute} ${this.minBrightness} ${this.darkenPerSecond}`;
-       console.log()
-       BluetoothSerial.write(
-            `ssc ${this.numberOfSchedules} ${this.holidayBitmask} ${holidayTurnOnSchedule} ${this.holidayBitmask} ${holidayTurnOffSchedule}
-            ${this.workdayBitmask} ${workdayTurnOnSchedule} ${this.workdayBitmask} ${workdayTurnOffSchedule}\n`);
+    const holidayTurnOnSchedule = `${this.holidayBitmask} ${this.state.holidayHour} ${this.state.holidayMinute} ${this.maxBrightness} ${this.brightenPerSecond}`;
+    const holidayTurnOffSchedule = `${this.holidayBitmask} ${this.getTurnOffHour(this.state.holidayHour)} ${this.state.holidayMinute} ${this.minBrightness} ${this.darkenPerSecond}`;
+    
+    return `${workdayTurnOnSchedule} ${workdayTurnOffSchedule} ${holidayTurnOnSchedule} ${holidayTurnOffSchedule}`
   }
 
-  sendWorkdaySchedule() {
-     const workdayTurnOnSchedule = `${this.state.workdayHour} ${this.state.workdayMinute} ${this.maxBrightness} ${this.brightenPerSecond}`;
-     const workdayTurnOffSchedule = `${this.getTurnOffHour(this.state.workdayHour)} ${this.state.workdayMinute} ${this.minBrightness} ${this.darkenPerSecond}`;
-     BluetoothSerial.write(`ssc ${this.numberOfSchedules} ${this.workdayBitmask} ${workdayTurnOnSchedule} ${this.workdayBitmask} ${workdayTurnOffSchedule}\n`);
+  send = schedules =>  {
+    console.log("schedules", `ssc ${this.numberOfSchedules} ${schedules}\n`)
+    BluetoothSerial.write(`ssc ${this.numberOfSchedules} ${schedules}\n`);
   }
 
-  sendHolidaySchedule() {
-     const holidayTurnOnSchedule = `${this.state.holidayHour} ${this.state.holidayMinute} ${this.maxBrightness} ${this.brightenPerSecond}`;
-     const holidayTurnOffSchedule = `${this.getTurnOffHour(this.state.holidayHour)} ${this.state.holidayMinute} ${this.minBrightness} ${this.darkenPerSecond}`;
-     BluetoothSerial.write(`ssc ${this.numberOfSchedules} ${this.holidayBitmask} ${holidayTurnOnSchedule} ${this.holidayBitmask} ${holidayTurnOffSchedule}\n`);
-  }
-
-  getTurnOffHour = hour => {
-    if (hour === 23) {
-        return 0;
-    } else {
-        return hour + 1;
-    }
-  }
+  getTurnOffHour = hour => hour === 23 ? 0 : hour + 1;
 
   render() {
-    if (this.state.connectionStatus === "connecting") {
+    if (this.state.connectionStatus === CONNECTION_STATUS.CONNECTING) {
       return <View style={styles.container}>
         <Text style={styles.welcome}>Connecting...</Text>
       </View>
     }
-    if (this.state.connectionStatus === "not-connected") {
-          return <View style={styles.container}>
-            <Text style={styles.welcome}>Failed to connect!</Text>
-            <Button
-              onPress={this.connectToDevice}
-              title="Try again"
-              color="#841584"
-              accessibilityLabel="Try connecting again"
-            />
-          </View>
+    if (this.state.connectionStatus === CONNECTION_STATUS.NOT_CONNECTED) {
+      return <View style={styles.container}>
+        <Text style={styles.welcome}>Failed to connect!</Text>
+        <Button
+          onPress={this.connectToDevice}
+          title="Try again"
+          color="#841584"
+          accessibilityLabel="Try connecting again"
+        />
+      </View>
     }
 
-    const hours = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];//[...Array(24).fill().keys()];
-    const minutes = [0,5,10,15,20,25,30,35,40,45,50,55];//...Array(60).fill().keys()];
-    const minuteOptions = this.renderOptionsFrom(minutes);
-    const hoursOptions = this.renderOptionsFrom(hours);
+    const minuteOptions = this.renderOptionsFrom(this.minutes);
+    const hoursOptions = this.renderOptionsFrom(this.hours);
     const hourDefault = this.renderDefaultValue("hour")
     const minuteDefault = this.renderDefaultValue("minute")
 
@@ -257,12 +237,14 @@ export default class App extends Component<Props> {
           onPress={this.turnOff}
           title="Turn Off Lamp"
           color="#841584"
-          accessibilityLabel="Learn more about this purple button"
+          accessibilityLabel="Turn off lamp"
         />
 
-        {this.state.showSuccessIcon && <Text style={styles.welcome}>Set!</Text>}
-        {this.state.error && <Text style={styles.welcome}>Error!</Text>}
-        {this.state.turnedOff && <Text style={styles.welcome}>Turned Off!</Text>}
+        <Message 
+          showSuccessIcon={this.state.showSuccessIcon}
+          error={this.state.error}
+          turnedOff={this.state.turnedOff}
+        />
         <Text>Workday schedule</Text>
         <Picker
           selectedValue={this.state.workdayHour}
@@ -303,7 +285,6 @@ export default class App extends Component<Props> {
           {minuteOptions}
         </Picker>
 
-
         <Button
           onPress={this.setSchedule}
           title="Set schedule"
@@ -332,8 +313,8 @@ const styles = StyleSheet.create({
     color: '#333333',
     marginBottom: 5,
   },
-   picker: {
-      height: 70,
-      width: 200,
-    },
+  picker: {
+    height: 70,
+    width: 200,
+  },
 });
