@@ -71,7 +71,6 @@ export default class App extends Component<Props> {
           const currentTime = new Date();
           const zoneOffset = currentTime.getTimezoneOffset() * 60; //seconds
           const timestamp = Math.floor(currentTime.getTime()/1000 - zoneOffset).toString();
-          console.log("timestamp I send", timestamp)
           BluetoothSerial.write(`sdt ${timestamp}\n`);
         }
       });
