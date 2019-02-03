@@ -27,8 +27,8 @@ export default class App extends Component<Props> {
     workdayMinute: "",
     holidayHour: "",
     holidayMinute: "",
-    showSuccessIcon: false,
-    turnedOff: false,
+    currentTime: "",
+    successMessage: "",
     error: false,
     connectionStatus: CONNECTION_STATUS.CONNECTING,
   };
@@ -54,8 +54,8 @@ export default class App extends Component<Props> {
 
     return this.connectToDevice().then(connected => {
       if (connected) {
-        console.log("getting schedules")
-        BluetoothSerial.write("gsc\n")
+        this.setTime();
+        this.getSchedules();
       }
     });
   }
@@ -64,34 +64,55 @@ export default class App extends Component<Props> {
     BluetoothSerial.disconnect();
   }
 
+  setTime = () => {
+    BluetoothSerial.isConnected()
+      .then(connected => {
+        if (connected) {
+          const currentTime = new Date();
+          const zoneOffset = currentTime.getTimezoneOffset() * 60; //seconds
+          const timestamp = Math.floor(currentTime.getTime()/1000 - zoneOffset).toString();
+          console.log("timestamp I send", timestamp)
+          BluetoothSerial.write(`sdt ${timestamp}\n`);
+        }
+      });
+  }
+
+  getSchedules = () => {
+    BluetoothSerial.write("gsc\n");
+  }
+
   handleResponses = () => {
     BluetoothSerial.on('read', (response) => {
       console.log('Reading data: ', response)
-      const responseArray = response.data.split(" ");
+      const data = response.data.replace("\r\n", "");
+      const responseArray = data.split(" ");
       const schedulesReceived = responseArray[0] === "ACK" && responseArray.length > 2;
-      const lampTurnedOff = "ACK 0\r\n";
-      const scheduleSet = responseArray[0] === "ACK\r\n" && responseArray.length === 1;
+      const lampTurnedOff = data === "ACK 0";
+      const scheduleSet = responseArray[0] === "ACK" && responseArray.length === 1;
+      const timeSet = responseArray[0] === "ACK" && responseArray.length === 2;
       const error = response.data.startsWith("ERR");
       if (error) {
         this.setState({
           error: true,
-          turnedOff: false,
-          showSuccessIcon: false,
+          successMessage: "",
         });
+        return;
       }
-      else if (scheduleSet) {
+      if (scheduleSet) {
         this.setState({
-            error: false,
-            turnedOff: false,
-            showSuccessIcon: true,
+          error: false,
+          successMessage: "Schedule set!",
         });
-      } else if (response.data === lampTurnedOff) {
-          this.setState({
-            error: false,
-            turnedOff: true,
-            showSuccessIcon: false,
-          });
-      } else if (schedulesReceived) {
+        return;
+      }
+      if (lampTurnedOff) {
+        this.setState({
+          error: false,
+          successMessage: "Lamp turned off",
+        });
+        return;
+      }
+      if (schedulesReceived) {
         const schedules = this.formSchedules(response.data);
         const turnOnSchedules = [schedules[0], schedules[2]];
         let workdayHour, workdayMinute, holidayHour, holidayMinute;
@@ -110,6 +131,17 @@ export default class App extends Component<Props> {
           holidayHour: parseInt(holidayHour),
           holidayMinute: parseInt(holidayMinute),
         });
+        return;
+      }
+      if (timeSet) {
+        const zoneOffset = new Date().getTimezoneOffset() * 60; //seconds
+        const timeReceived = new Date((Number(responseArray[1]) + zoneOffset) * 1000);
+        this.setState({
+          error: false,
+          successMessage: "Time set!",
+          currentTime: timeReceived.toString(),
+        });
+        return;
       }
     });
   }
@@ -239,11 +271,17 @@ export default class App extends Component<Props> {
           color="#841584"
           accessibilityLabel="Turn off lamp"
         />
+        <Text style={styles.welcome}>Current time: {this.state.currentTime}</Text>
+        <Button
+          onPress={this.setTime}
+          title="Set time to current"
+          color="#841584"
+          accessibilityLabel="Set time to current"
+        />
 
-        <Message 
-          showSuccessIcon={this.state.showSuccessIcon}
+        <Message
+          successMessage={this.state.successMessage}
           error={this.state.error}
-          turnedOff={this.state.turnedOff}
         />
         <Text>Workday schedule</Text>
         <Picker

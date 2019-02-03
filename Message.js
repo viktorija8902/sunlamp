@@ -1,14 +1,12 @@
 import React from 'react';
 import { Text, StyleSheet } from 'react-native';
 
-export const Message = ({ showSuccessIcon, error, turnedOff }) => {
+export const Message = ({ successMessage, error, turnedOff }) => {
   let text = "";
-  if (showSuccessIcon) {
-    text = "Set!";
+  if (successMessage !== "") {
+    text = successMessage;
   } else if (error) {
     text = "Error!";
-  } else if (turnedOff) {
-    text = "Turned Off!";
   }
 
   return <Text style={styles.welcome}>{text}</Text>  
